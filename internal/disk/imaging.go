@@ -4,8 +4,8 @@ package disk
 import (
 	"fmt"
 
-	"github.com/ilexum-group/bitex/internal/models"
 	"github.com/ilexum-group/bitex/internal/tsk"
+	"github.com/ilexum-group/bitex/pkg/models"
 )
 
 // AnalyzeDisk performs metadata-only forensic analysis of a disk.

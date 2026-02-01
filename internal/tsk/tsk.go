@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/ilexum-group/bitex/internal/logger"
-	"github.com/ilexum-group/bitex/internal/models"
+	"github.com/ilexum-group/bitex/pkg/models"
 )
 
 // AnalyzeDisk performs metadata-only analysis of a disk using TSK tools.
