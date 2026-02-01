@@ -1,0 +1,124 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+
+    - name: Cache Go modules
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/go/pkg/mod
+          vendor
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: |
+        go mod download
+        go mod vendor
+
+    - name: Run tests
+      run: go test -mod=vendor -v ./tests/...
+
+    - name: Run tests with coverage
+      run: go test -mod=vendor -coverprofile=coverage.out ./tests/...
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+
+    - name: Cache Go modules
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/go/pkg/mod
+          vendor
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: |
+        go mod download
+        go mod vendor
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Build application
+      run: go build -mod=vendor -v ./cmd/bitex
+
+    - name: Check formatting
+      run: |
+        if [ "$(gofmt -s -l $(find . -name "*.go" -not -path "./vendor/*") | wc -l)" -gt 0 ]; then
+          echo "The following files are not formatted properly:"
+          gofmt -s -l $(find . -name "*.go" -not -path "./vendor/*")
+          exit 1
+        fi
+
+    - name: Run go vet
+      run: go vet -mod=vendor ./...
+
+    - name: Run govulncheck
+      uses: golang/govulncheck-action@v1
+      with:
+        go-version-input: '1.25'
+        go-package: ./...
+
+    - name: Run golint (if available)
+      run: |
+        if command -v golint &> /dev/null; then
+          golint ./...
+        else
+          echo "golint not available, skipping"
+        fi
+
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v9
+      with:
+        version: latest
+        args: --timeout=5m

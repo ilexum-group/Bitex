@@ -1,8 +1,8 @@
-// Bitex models for TSK analysis results (migrated from Tracium)
+// Package models provides Bitex models for TSK analysis results (migrated from Tracium).
 package models
 
-// TSKAnalysis represents The Sleuth Kit analysis results for a disk
-// (copied from Tracium for Bitex independence)
+// TSKAnalysis represents The Sleuth Kit analysis results for a disk.
+// (copied from Tracium for Bitex independence).
 type TSKAnalysis struct {
 	DiskPath          string              `json:"disk_path"`
 	FilesystemStats   *TSKFilesystemStats `json:"filesystem_stats,omitempty"`
@@ -12,8 +12,12 @@ type TSKAnalysis struct {
 	CommandLogs       []TSKCommandLog     `json:"command_logs"`
 	CaseID            string              `json:"case_id"` // Case identifier for correlation
 	Errors            []string            `json:"errors,omitempty"`
+
+	// Custody Chain - Complete digital evidence custody tracking
+	CustodyChain *CustodyChainEntry `json:"custody_chain"`
 }
 
+// TSKFilesystemStats contains filesystem-level statistics from TSK analysis.
 type TSKFilesystemStats struct {
 	FilesystemType string `json:"filesystem_type"`
 	BlockSize      int    `json:"block_size"`
@@ -26,6 +30,7 @@ type TSKFilesystemStats struct {
 	LastCheckTime  int64  `json:"last_check_time,omitempty"`
 }
 
+// TSKFileEntry represents a single file entry from TSK analysis.
 type TSKFileEntry struct {
 	Path         string `json:"path"`
 	Inode        uint64 `json:"inode"`
@@ -41,6 +46,7 @@ type TSKFileEntry struct {
 	Deleted      bool   `json:"deleted"`
 }
 
+// TSKCommandLog represents a log entry for a TSK command execution.
 type TSKCommandLog struct {
 	Command    string   `json:"command"`
 	Arguments  []string `json:"arguments"`

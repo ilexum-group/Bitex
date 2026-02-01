@@ -5,18 +5,19 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-       
+
 	"net/http"
 
 	"github.com/ilexum-group/bitex/internal/logger"
 )
 
+// Config holds the configuration for sending analysis results.
 type Config struct {
 	ServerURL  string
 	AgentToken string
 }
 
-// SendAnalysis sends the analysis result to the server as JSON
+// SendAnalysis sends the analysis result to the server as JSON.
 func SendAnalysis(cfg *Config, analysis interface{}) error {
 	logger.Info("Preparing to send analysis to server", map[string]string{"url": cfg.ServerURL})
 
@@ -49,7 +50,7 @@ func SendAnalysis(cfg *Config, analysis interface{}) error {
 		logger.Error("Failed to send request", map[string]string{"error": err.Error()})
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Error("Server returned error", map[string]string{"status": resp.Status})

@@ -7,14 +7,17 @@ import (
 	"time"
 )
 
+// Info logs an informational message with optional fields.
 func Info(msg string, fields map[string]string) {
 	log("INFO", msg, fields)
 }
 
+// Error logs an error message with optional fields.
 func Error(msg string, fields map[string]string) {
 	log("ERROR", msg, fields)
 }
 
+// Debug logs a debug message with optional fields.
 func Debug(msg string, fields map[string]string) {
 	log("DEBUG", msg, fields)
 }

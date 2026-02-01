@@ -1,0 +1,47 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  issues-exit-code: 1
+
+linters:
+  enable:
+    - govet          # Vet examines Go source code and reports suspicious constructs
+    - staticcheck    # Static analysis checks
+    - errcheck       # Checks for unchecked errors
+    - gocyclo        # Computes and checks cyclomatic complexity
+    - dupl           # Tool for code clone detection
+    - unused         # Checks for unused constants, variables, functions and types
+    - revive         # Fast, configurable, extensible, flexible, and beautiful linter (replaces golint)
+    - ineffassign    # Detects ineffectual assignments
+    - misspell       # Finds commonly misspelled English words in comments
+    - unconvert      # Remove unnecessary type conversions
+    - gocritic       # Provides diagnostics that check for bugs, performance and style issues
+    - gosec          # Inspects source code for security problems
+    - unparam        # Reports unused function parameters
+    - godot          # Check if comments end in a period
+    - errname        # Checks that sentinel errors are prefixed with Err
+    - errorlint      # Error wrapping scheme checks
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+      - name: var-naming
+        severity: warning
+        disabled: false
+      - name: package-comments
+        severity: warning
+        disabled: false
+  gocyclo:
+    min-complexity: 15
+  dupl:
+    threshold: 100
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

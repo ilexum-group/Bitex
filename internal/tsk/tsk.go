@@ -1,9 +1,10 @@
-// The Sleuth Kit (TSK) based disk analysis logic migrated from Tracium
+// Package tsk provides The Sleuth Kit (TSK) based disk analysis logic migrated from Tracium.
 package tsk
 
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -14,7 +15,7 @@ import (
 	"github.com/ilexum-group/bitex/internal/models"
 )
 
-// AnalyzeDisk performs metadata-only analysis of a disk using TSK tools
+// AnalyzeDisk performs metadata-only analysis of a disk using TSK tools.
 func AnalyzeDisk(diskPath string) (*models.TSKAnalysis, error) {
 	logger.Info("Starting disk analysis", map[string]string{"diskPath": diskPath})
 
@@ -55,12 +56,8 @@ func AnalyzeDisk(diskPath string) (*models.TSKAnalysis, error) {
 		logger.Info("File listing completed", map[string]string{"fileCount": strconv.Itoa(len(fileListing))})
 	}
 
-	if err := runIstat(diskPath, offset, analysis, analysis.FileListing); err != nil {
-		analysis.Errors = append(analysis.Errors, fmt.Sprintf("istat failed: %v", err))
-		logger.Error("Inode metadata analysis failed", map[string]string{"error": err.Error()})
-	} else {
-		logger.Info("Deletion times updated for deleted files", map[string]string{})
-	}
+	runIstat(diskPath, offset, analysis, analysis.FileListing)
+	logger.Info("Deletion times updated for deleted files", map[string]string{})
 
 	logger.Info("Disk analysis completed", map[string]string{"diskPath": diskPath})
 	return analysis, nil
@@ -286,7 +283,7 @@ func runIstat(
 	offset uint64,
 	analysis *models.TSKAnalysis,
 	fileListing []models.TSKFileEntry,
-) error {
+) {
 
 	inodeSet := make(map[uint64]bool)
 	for _, f := range fileListing {
@@ -332,8 +329,6 @@ func runIstat(
 			}
 		}
 	}
-
-	return nil
 }
 
 // -------------------
@@ -368,12 +363,13 @@ func runCommandWithTimeout(command string, args []string, analysis *models.TSKAn
 		if len(output) > 0 {
 			return string(output), nil
 		}
-		return "", fmt.Errorf(errorMsg)
+		return "", fmt.Errorf("%s", errorMsg)
 	}
 
 	// manejar otros errores normales
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
 			exitCode = exitError.ExitCode()
 			errorMsg = exitError.Error()
 		} else {
