@@ -5,11 +5,32 @@ package models
 // (copied from Tracium for Bitex independence).
 type TSKAnalysis struct {
 	DiskPath        string              `json:"disk_path"`
-	FilesystemStats *TSKFilesystemStats `json:"filesystem_stats,omitempty"`
-	FileListing     []TSKFileEntry      `json:"file_listing,omitempty"`
+	Partitions      []PartitionAnalysis `json:"partitions,omitempty"`       // Analysis per partition
+	FilesystemStats *TSKFilesystemStats `json:"filesystem_stats,omitempty"` // Deprecated: use Partitions[].FilesystemStats
+	FileListing     []TSKFileEntry      `json:"file_listing,omitempty"`     // Deprecated: use Partitions[].FileListing
 	ToolVersions    map[string]string   `json:"tool_versions"`
 	CaseID          string              `json:"case_id"`       // Case identifier for correlation
 	CustodyChain    *CustodyChainEntry  `json:"custody_chain"` // Custody Chain - Complete digital evidence custody tracking
+}
+
+// PartitionAnalysis represents analysis results for a single partition.
+type PartitionAnalysis struct {
+	PartitionNumber int                 `json:"partition_number"` // Partition number from mmls
+	StartSector     uint64              `json:"start_sector"`     // Start sector offset
+	EndSector       uint64              `json:"end_sector"`       // End sector
+	Length          uint64              `json:"length"`           // Length in sectors
+	Description     string              `json:"description"`      // Partition type description
+	FilesystemStats *TSKFilesystemStats `json:"filesystem_stats,omitempty"`
+	FileListing     []TSKFileEntry      `json:"file_listing,omitempty"`
+}
+
+// PartitionInfo represents a partition detected by mmls.
+type PartitionInfo struct {
+	PartitionNumber int
+	StartSector     uint64
+	EndSector       uint64
+	Length          uint64
+	Description     string
 }
 
 // TSKFilesystemStats contains filesystem-level statistics from TSK analysis.
@@ -27,16 +48,17 @@ type TSKFilesystemStats struct {
 
 // TSKFileEntry represents a single file entry from TSK analysis.
 type TSKFileEntry struct {
-	Path         string `json:"path"`
-	Inode        uint64 `json:"inode"`
-	Type         string `json:"type"`
-	Size         int64  `json:"size"`
-	ModifiedTime int64  `json:"modified_time"`
-	AccessedTime int64  `json:"accessed_time"`
-	CreatedTime  int64  `json:"created_time"`
-	DeletionTime int64  `json:"deletion_time,omitempty"`
-	Permissions  string `json:"permissions"`
-	UID          int    `json:"uid"`
-	GID          int    `json:"gid"`
-	Deleted      bool   `json:"deleted"`
+	Path            string `json:"path"`
+	Inode           uint64 `json:"inode"`
+	Type            string `json:"type"`
+	Size            int64  `json:"size"`
+	ModifiedTime    int64  `json:"modified_time"`
+	AccessedTime    int64  `json:"accessed_time"`
+	CreatedTime     int64  `json:"created_time"`
+	DeletionTime    int64  `json:"deletion_time,omitempty"`
+	Permissions     string `json:"permissions"`
+	UID             int    `json:"uid"`
+	GID             int    `json:"gid"`
+	Deleted         bool   `json:"deleted"`
+	PartitionNumber int    `json:"partition_number,omitempty"` // Which partition this file is from
 }
