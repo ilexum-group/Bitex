@@ -1,4 +1,5 @@
-// Package tsk provides The Sleuth Kit (TSK) based disk analysis logic migrated from Tracium.
+// Package tsk provides The Sleuth Kit (TSK) based disk analysis logic.
+// This package encapsulates all TSK tool interactions (mmls, fsstat, fls, istat) for forensic disk analysis.
 package tsk
 
 import (
@@ -11,64 +12,140 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilexum-group/bitex/internal/logger"
+	internalos "github.com/ilexum-group/bitex/internal/os"
+	"github.com/ilexum-group/bitex/internal/utils"
 	"github.com/ilexum-group/bitex/pkg/models"
 )
 
-// AnalyzeDisk performs metadata-only analysis of a disk using TSK tools.
-func AnalyzeDisk(diskPath string) (*models.TSKAnalysis, error) {
-	logger.Info("Starting disk analysis", map[string]string{"diskPath": diskPath})
+// ============================================================================
+// TSKAnalyzer Structure
+// ============================================================================
+
+// Analyzer encapsulates TSK analysis functionality with custody chain logging.
+type Analyzer struct {
+	custodyChainEntry *models.CustodyChainEntry
+	osImpl            *internalos.OS
+}
+
+// NewTSKAnalyzer creates a new Analyzer instance.
+// Parameters:
+//   - custodyChainEntry: Custody chain for logging analysis operations
+//   - osImpl: Operating system abstraction (currently unused, reserved for future use)
+func NewTSKAnalyzer(custodyChainEntry *models.CustodyChainEntry, osImpl *internalos.OS) *Analyzer {
+	return &Analyzer{
+		custodyChainEntry: custodyChainEntry,
+		osImpl:            osImpl,
+	}
+}
+
+// ============================================================================
+// Main Analysis Function
+// ============================================================================
+
+// AnalyzeDisk performs comprehensive metadata-only disk analysis using TSK tools.
+// This function orchestrates the complete analysis pipeline:
+//  1. Check TSK tool versions
+//  2. Detect partition offset using mmls
+//  3. Extract filesystem statistics using fsstat
+//  4. List all files (including deleted) using fls
+//  5. Get deletion times for deleted files using istat
+//
+// Parameters:
+//   - diskPath: Path to the disk image or block device to analyze
+//
+// Returns:
+//   - TSKAnalysis structure containing all collected metadata
+//   - Error if critical failure occurs (non-critical errors are logged but don't stop analysis)
+func (t *Analyzer) AnalyzeDisk(diskPath string) (*models.TSKAnalysis, error) {
+	t.custodyChainEntry.LogInfo("DiskAnalysisStart", fmt.Sprintf("Starting TSK analysis: %s", diskPath))
 
 	analysis := &models.TSKAnalysis{
-		DiskPath:          diskPath,
-		AnalysisTimestamp: time.Now().Unix(),
-		ToolVersions:      make(map[string]string),
-		CommandLogs:       []models.TSKCommandLog{},
-		Errors:            []string{},
+		DiskPath:     diskPath,
+		ToolVersions: make(map[string]string),
 	}
 
-	if err := getToolVersions(analysis); err != nil {
-		analysis.Errors = append(analysis.Errors, fmt.Sprintf("Version check failed: %v", err))
-		logger.Error("Tool version check failed", map[string]string{"error": err.Error()})
+	// Step 1: Get tool versions
+	if err := t.getToolVersions(analysis); err != nil {
+		t.custodyChainEntry.LogError("ToolVersionCheck", "Failed to get TSK tool versions", err)
 	}
 
-	offset, err := detectOffset(diskPath, analysis)
+	// Step 2: Detect partition offset
+	offset, err := t.detectOffset(diskPath, analysis)
 	if err != nil {
-		analysis.Errors = append(analysis.Errors, fmt.Sprintf("mmls failed: %v", err))
-		logger.Error("Failed to detect partition offset", map[string]string{"error": err.Error()})
+		t.custodyChainEntry.LogError("OffsetDetection", "Failed to detect partition offset", err)
 		return analysis, nil
 	}
-	logger.Info("Detected partition offset", map[string]string{"offset": strconv.FormatUint(offset, 10)})
+	t.custodyChainEntry.LogInfo("OffsetDetected", fmt.Sprintf("Partition offset: %d", offset))
 
-	if fsStats, err := runFsstat(diskPath, offset, analysis); err != nil {
-		analysis.Errors = append(analysis.Errors, fmt.Sprintf("fsstat failed: %v", err))
-		logger.Error("Filesystem stats analysis failed", map[string]string{"error": err.Error()})
+	// Step 3: Get filesystem statistics
+	if fsStats, err := t.runFsstat(diskPath, offset, analysis); err != nil {
+		t.custodyChainEntry.LogError("FilesystemStats", "Failed to collect filesystem statistics", err)
 	} else {
 		analysis.FilesystemStats = fsStats
-		logger.Info("Filesystem stats collected", map[string]string{"filesystemType": fsStats.FilesystemType})
+		t.custodyChainEntry.LogInfo("FilesystemStats", fmt.Sprintf("Type: %s", fsStats.FilesystemType))
 	}
 
-	if fileListing, err := runFls(diskPath, offset, analysis); err != nil {
-		analysis.Errors = append(analysis.Errors, fmt.Sprintf("fls failed: %v", err))
-		logger.Error("File listing failed", map[string]string{"error": err.Error()})
+	// Step 4: List all files
+	if fileListing, err := t.runFls(diskPath, offset, analysis); err != nil {
+		t.custodyChainEntry.LogError("FileListing", "Failed to list files", err)
 	} else {
 		analysis.FileListing = fileListing
-		logger.Info("File listing completed", map[string]string{"fileCount": strconv.Itoa(len(fileListing))})
+		t.custodyChainEntry.LogInfo("FileListingComplete", fmt.Sprintf("Found %d files", len(fileListing)))
 	}
 
-	runIstat(diskPath, offset, analysis, analysis.FileListing)
-	logger.Info("Deletion times updated for deleted files", map[string]string{})
+	// Step 5: Get deletion times for deleted files
+	t.runIstat(diskPath, offset, analysis, analysis.FileListing)
+	t.custodyChainEntry.LogInfo("DeletionTimes", "Updated deletion times for deleted files")
 
-	logger.Info("Disk analysis completed", map[string]string{"diskPath": diskPath})
+	t.custodyChainEntry.LogInfo("DiskAnalysisComplete", fmt.Sprintf("Completed TSK analysis: %s", diskPath))
 	return analysis, nil
 }
 
-// -------------------
-// Offset detection
-// -------------------
+// ============================================================================
+// TSK Tool Version Detection
+// ============================================================================
 
-func detectOffset(diskPath string, analysis *models.TSKAnalysis) (uint64, error) {
-	output, err := runCommandWithTimeout("mmls", []string{diskPath}, analysis, 30*time.Second)
+// getToolVersions queries all TSK tools for their version information.
+// This ensures the custody chain documents which tool versions were used.
+//
+// Parameters:
+//   - analysis: Analysis structure where tool versions are stored
+//
+// Returns error if any tool version cannot be retrieved.
+func (t *Analyzer) getToolVersions(analysis *models.TSKAnalysis) error {
+	tools := []string{"mmls", "fsstat", "fls", "istat"}
+
+	for _, tool := range tools {
+		version, err := t.runCommandWithTimeout(tool, []string{"-V"}, 10*time.Second)
+		if err != nil {
+			return fmt.Errorf("failed to get %s version: %w", tool, err)
+		}
+
+		lines := strings.Split(strings.TrimSpace(version), "\n")
+		if len(lines) > 0 {
+			analysis.ToolVersions[tool] = strings.TrimSpace(lines[0])
+		}
+	}
+
+	return nil
+}
+
+// ============================================================================
+// Partition Offset Detection (mmls)
+// ============================================================================
+
+// detectOffset uses mmls to detect the partition offset in sectors.
+// This offset is required for fsstat, fls, and istat commands.
+//
+// Parameters:
+//   - diskPath: Path to disk image
+//   - analysis: Analysis structure for command logging
+//
+// Returns:
+//   - Partition offset in sectors
+//   - Error if no valid partition is found
+func (t *Analyzer) detectOffset(diskPath string, _ *models.TSKAnalysis) (uint64, error) {
+	output, err := t.runCommandWithTimeout("mmls", []string{diskPath}, 30*time.Second)
 	if err != nil {
 		return 0, err
 	}
@@ -77,64 +154,58 @@ func detectOffset(diskPath string, analysis *models.TSKAnalysis) (uint64, error)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		// Example:
-		// 002:  000:000   0000000032   0060620799   0060620768   Win95 FAT32
+		// Skip header lines and empty lines
 		if len(line) == 0 || strings.HasPrefix(line, "Slot") || strings.HasPrefix(line, "Meta") {
 			continue
 		}
 
+		// Parse partition table line: "002:  000:000   0000000032   0060620799   0060620768   Win95 FAT32"
 		fields := strings.Fields(line)
 		if len(fields) < 4 {
 			continue
 		}
 
+		// Third field is the start sector
 		start, err := strconv.ParseUint(fields[2], 10, 64)
 		if err == nil && start > 0 {
 			return start, nil
 		}
 	}
 
-	return 0, fmt.Errorf("no valid partition offset found")
+	return 0, fmt.Errorf("no valid partition offset found in mmls output")
 }
 
-// -------------------
-// Tool versions
-// -------------------
+// ============================================================================
+// Filesystem Statistics (fsstat)
+// ============================================================================
 
-func getToolVersions(analysis *models.TSKAnalysis) error {
-	tools := []string{"mmls", "fsstat", "fls", "istat"}
-	for _, tool := range tools {
-		version, err := runCommandWithTimeout(tool, []string{"-V"}, analysis, 10*time.Second)
-		if err != nil {
-			return fmt.Errorf("failed to get %s version: %w", tool, err)
-		}
-		lines := strings.Split(strings.TrimSpace(version), "\n")
-		if len(lines) > 0 {
-			analysis.ToolVersions[tool] = strings.TrimSpace(lines[0])
-		}
-	}
-	return nil
-}
-
-// -------------------
-// fsstat
-// -------------------
-
-func runFsstat(diskPath string, offset uint64, analysis *models.TSKAnalysis) (*models.TSKFilesystemStats, error) {
+// runFsstat executes fsstat to collect filesystem metadata.
+// Supports both ext4/NTFS and FAT32 filesystem types.
+//
+// Parameters:
+//   - diskPath: Path to disk image
+//   - offset: Partition offset in sectors
+//   - analysis: Analysis structure for command logging
+//
+// Returns:
+//   - FilesystemStats structure with collected metadata
+//   - Error if fsstat execution fails
+func (t *Analyzer) runFsstat(diskPath string, offset uint64, _ *models.TSKAnalysis) (*models.TSKFilesystemStats, error) {
 	args := []string{"-o", strconv.FormatUint(offset, 10), diskPath}
-	output, err := runCommandWithTimeout("fsstat", args, analysis, 30*time.Second)
+	output, err := t.runCommandWithTimeout("fsstat", args, 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
 
 	stats := &models.TSKFilesystemStats{}
 	scanner := bufio.NewScanner(strings.NewReader(output))
+	clusterSize := 0
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		clusterSize := 0
 
 		switch {
+		// Common filesystem fields
 		case strings.Contains(line, "File System Type:"):
 			stats.FilesystemType = strings.TrimSpace(strings.Split(line, ":")[1])
 
@@ -163,7 +234,7 @@ func runFsstat(diskPath string, offset uint64, analysis *models.TSKAnalysis) (*m
 				stats.FreeInodes = v
 			}
 
-		// FAT32-specific parsing
+		// FAT32-specific fields
 		case strings.HasPrefix(line, "Sector Size:"):
 			if v, err := strconv.Atoi(strings.TrimSpace(strings.Split(line, ":")[1])); err == nil {
 				stats.BlockSize = v
@@ -172,10 +243,10 @@ func runFsstat(diskPath string, offset uint64, analysis *models.TSKAnalysis) (*m
 		case strings.HasPrefix(line, "Cluster Size:"):
 			if v, err := strconv.Atoi(strings.TrimSpace(strings.Split(line, ":")[1])); err == nil {
 				clusterSize = v
-			}
-			// opcional: usar clusterSize como referencia de bloque lógico
-			if stats.BlockSize == 0 {
-				stats.BlockSize = clusterSize
+				// Use cluster size as block size if not set
+				if stats.BlockSize == 0 {
+					stats.BlockSize = clusterSize
+				}
 			}
 
 		case strings.HasPrefix(line, "Total Cluster Range:"):
@@ -190,8 +261,8 @@ func runFsstat(diskPath string, offset uint64, analysis *models.TSKAnalysis) (*m
 
 		case strings.HasPrefix(line, "Free Sector Count"):
 			if v, err := strconv.ParseInt(strings.TrimSpace(strings.Split(line, ":")[1]), 10, 32); err == nil {
-				// convertir a bloques usando cluster size / sector size
-				if stats.BlockSize > 0 {
+				// Convert sectors to blocks using cluster/sector size ratio
+				if stats.BlockSize > 0 && clusterSize > 0 {
 					stats.FreeBlocks = v / int64(clusterSize/stats.BlockSize)
 				} else {
 					stats.FreeBlocks = v
@@ -203,18 +274,32 @@ func runFsstat(diskPath string, offset uint64, analysis *models.TSKAnalysis) (*m
 	return stats, nil
 }
 
-// -------------------
-// fls
-// -------------------
+// ============================================================================
+// File Listing (fls)
+// ============================================================================
 
-func runFls(diskPath string, offset uint64, analysis *models.TSKAnalysis) ([]models.TSKFileEntry, error) {
+// runFls executes fls to list all files (including deleted) in the filesystem.
+// Uses machine-readable output format (-m flag) for reliable parsing.
+//
+// Parameters:
+//   - diskPath: Path to disk image
+//   - offset: Partition offset in sectors
+//   - analysis: Analysis structure for command logging
+//
+// Returns:
+//   - Array of TSKFileEntry structures
+//   - Error if fls execution fails
+func (t *Analyzer) runFls(diskPath string, offset uint64, _ *models.TSKAnalysis) ([]models.TSKFileEntry, error) {
 	args := []string{
 		"-o", strconv.FormatUint(offset, 10),
-		"-r", "-m", "/", "-d", "-p",
+		"-r",      // Recursive
+		"-m", "/", // Machine-readable format
+		"-d", // Include deleted files
+		"-p", // Display full path
 		diskPath,
 	}
 
-	output, err := runCommandWithTimeout("fls", args, analysis, 30*time.Second)
+	output, err := t.runCommandWithTimeout("fls", args, 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -228,18 +313,20 @@ func runFls(diskPath string, offset uint64, analysis *models.TSKAnalysis) ([]mod
 			continue
 		}
 
+		// Check if file is deleted (marked with * or contains "(deleted)")
 		isDeleted := strings.HasPrefix(line, "*") || strings.Contains(line, "(deleted)")
 		if isDeleted {
 			line = strings.TrimPrefix(line, "*")
 		}
 
+		// Parse pipe-separated fields from machine-readable output
 		parts := strings.Split(line, "|")
-		if len(parts) < 3 {
+		if len(parts) < 11 {
 			continue
 		}
 
+		// Parse inode number (handle special case where fsID is 0)
 		fsID := parts[0]
-
 		var inode uint64
 		if fsID == "0" {
 			inode, err = strconv.ParseUint(parts[2], 10, 64)
@@ -250,7 +337,8 @@ func runFls(diskPath string, offset uint64, analysis *models.TSKAnalysis) ([]mod
 			continue
 		}
 
-		size, _ := strconv.ParseInt(parts[6], 10, 64) // este es el tamaño que a veces sale 0
+		// Parse file metadata
+		size, _ := strconv.ParseInt(parts[6], 10, 64)
 		modified, _ := strconv.ParseInt(parts[7], 10, 64)
 		accessed, _ := strconv.ParseInt(parts[8], 10, 64)
 		created, _ := strconv.ParseInt(parts[10], 10, 64)
@@ -274,17 +362,27 @@ func runFls(diskPath string, offset uint64, analysis *models.TSKAnalysis) ([]mod
 	return files, nil
 }
 
-// -------------------
-// istat
-// -------------------
+// ============================================================================
+// Inode Statistics (istat) - Deletion Time Extraction
+// ============================================================================
 
-func runIstat(
+// runIstat executes istat for deleted files to extract deletion timestamps.
+// This provides forensic evidence of when files were deleted.
+//
+// Parameters:
+//   - diskPath: Path to disk image
+//   - offset: Partition offset in sectors
+//   - analysis: Analysis structure for command logging
+//   - fileListing: Array of file entries to update with deletion times
+//
+// Note: Modifies fileListing in-place by setting DeletionTime for deleted files.
+func (t *Analyzer) runIstat(
 	diskPath string,
 	offset uint64,
-	analysis *models.TSKAnalysis,
+	_ *models.TSKAnalysis,
 	fileListing []models.TSKFileEntry,
 ) {
-
+	// Build set of unique inodes for deleted files
 	inodeSet := make(map[uint64]bool)
 	for _, f := range fileListing {
 		if f.Deleted {
@@ -292,6 +390,7 @@ func runIstat(
 		}
 	}
 
+	// Query istat for each deleted inode
 	for inode := range inodeSet {
 		args := []string{
 			"-o", strconv.FormatUint(offset, 10),
@@ -299,18 +398,18 @@ func runIstat(
 			strconv.FormatUint(inode, 10),
 		}
 
-		output, err := runCommandWithTimeout("istat", args, analysis, 30*time.Second)
+		output, err := t.runCommandWithTimeout("istat", args, 30*time.Second)
 		if err != nil {
 			continue
 		}
 
+		// Parse deletion time from istat output
 		var deletionTime int64
 		scanner := bufio.NewScanner(strings.NewReader(output))
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 
-			// Deleted Time
 			if strings.Contains(line, "Deleted Time:") {
 				parts := strings.SplitN(line, ":", 2)
 				if len(parts) == 2 {
@@ -321,7 +420,7 @@ func runIstat(
 			}
 		}
 
-		// Set DeletionTime in fileListing
+		// Update deletion time in file listing
 		for i := range fileListing {
 			if fileListing[i].Inode == inode && fileListing[i].Deleted {
 				fileListing[i].DeletionTime = deletionTime
@@ -331,63 +430,65 @@ func runIstat(
 	}
 }
 
-// -------------------
-// Command runner
-// -------------------
+// ============================================================================
+// Command Execution with Timeout
+// ============================================================================
 
-func runCommandWithTimeout(command string, args []string, analysis *models.TSKAnalysis, timeout time.Duration) (string, error) {
+// runCommandWithTimeout executes a TSK command with timeout protection.
+// All command executions are logged to the analysis command history for custody chain.
+//
+// Parameters:
+//   - command: Name of the TSK tool to execute (mmls, fsstat, fls, istat)
+//   - args: Command-line arguments
+//   - timeout: Maximum execution time before cancellation
+//
+// Returns:
+//   - Command output as string
+//   - Error if command fails or times out
+func (t *Analyzer) runCommandWithTimeout(command string, args []string, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	timeCommandStart := time.Now()
 	cmd := exec.CommandContext(ctx, command, args...)
 	output, err := cmd.Output()
 
 	exitCode := 0
-	var errorMsg string
 
-	// si el contexto expiró (timeout)
+	// Handle timeout
 	if ctx.Err() == context.DeadlineExceeded {
-		errorMsg = fmt.Sprintf("command timed out after %s", timeout)
-		// registrar log aunque haya timeout
-		logEntry := models.TSKCommandLog{
-			Command:    command,
-			Arguments:  args,
-			Timestamp:  time.Now().Unix(),
-			ExitCode:   0,
-			OutputSize: len(output),
-			Error:      errorMsg,
-		}
-		analysis.CommandLogs = append(analysis.CommandLogs, logEntry)
+		timeoutMsg := fmt.Sprintf("command timed out after %s", timeout)
+		t.custodyChainEntry.LogWarning("CommandTimeout", fmt.Sprintf("%s timeout: %s", command, timeout))
 
-		// devolvemos output parcial si lo hay, con warning
+		// Return partial output if available
 		if len(output) > 0 {
 			return string(output), nil
 		}
-		return "", fmt.Errorf("%s", errorMsg)
+		return "", fmt.Errorf("%s", timeoutMsg)
 	}
 
-	// manejar otros errores normales
+	// Handle other errors
 	if err != nil {
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) {
 			exitCode = exitError.ExitCode()
-			errorMsg = exitError.Error()
 		} else {
 			exitCode = -1
-			errorMsg = err.Error()
 		}
 	}
 
-	// registrar log
-	logEntry := models.TSKCommandLog{
-		Command:    command,
-		Arguments:  args,
-		Timestamp:  time.Now().Unix(),
-		ExitCode:   exitCode,
-		OutputSize: len(output),
-		Error:      errorMsg,
-	}
-	analysis.CommandLogs = append(analysis.CommandLogs, logEntry)
+	// Log command execution to custody chain
+	t.custodyChainEntry.LogCommand(
+		utils.GenerateRandomID(),
+		command,
+		args,
+		timeCommandStart, // Approximate start time
+		time.Now(),       // End time
+		exitCode,
+		err,
+		"", // Working directory (optional)
+		"", // Target resource (optional)
+	)
 
 	if err != nil {
 		return string(output), fmt.Errorf("command failed: %w", err)

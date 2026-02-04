@@ -2,126 +2,155 @@
 
 ## Description
 
-Bitex is a disk acquisition and forensic analysis tool that performs disk imaging and analysis using The Sleuth Kit (TSK). It provides strict read-only access to disks and disk images, ensuring forensically sound evidence extraction.
+Bitex is a forensic disk analysis tool that performs metadata extraction using The Sleuth Kit (TSK). It provides strict read-only access to disks and disk images, ensuring forensically sound evidence extraction with comprehensive custody chain tracking. All analysis results are transmitted to a remote server for centralized forensic management.
 
 ## Purpose
 
-Bitex acquires and analyzes disk images and block devices, extracting partition tables, filesystem metadata, and file system artifacts. It integrates with TSK tools (mmls, fsstat, fls, istat) to provide comprehensive disk-level forensic analysis.
+Bitex analyzes disk images and block devices, extracting partition tables, filesystem metadata, and file system artifacts without reading file contents. It integrates with TSK tools (mmls, fsstat, fls, istat) to provide comprehensive disk-level forensic analysis with complete audit trails.
 
 ## Problem It Solves
 
-Forensic disk analysis requires safe, read-only access to storage devices without risking data modification. Bitex provides a standalone CLI tool that performs disk acquisition and TSK-based analysis, outputting structured JSON results that can be transmitted to centralized analysis servers (Processor) or used independently for forensic investigations.
+Forensic disk analysis requires safe, read-only access to storage devices without risking data modification. Bitex provides a CLI tool that performs TSK-based metadata extraction with complete custody chain logging, transmitting structured JSON results to centralized analysis servers for forensic investigations.
 
+## Key Features
+
+- **Read-only metadata extraction** - No file content reading, only TSK metadata
+- **Custody chain tracking** - Complete audit trail of all operations
+- **Cross-platform support** - Windows, Linux, and macOS
+- **RFC 5424 logging** - Compliant forensic logging
+- **Server transmission** - All results sent to remote server
 
 ### Example CLI Usage
 
 ```bash
-# Output JSON to stdout
-bitex --disk /path/to/disk.img
+# Analyze disk and send to server
+bitex --disk /path/to/disk.img --case-id "CASE-2025-001" \
+  --server https://server.com/api/analysis \
+  --token your-auth-token
 
-# Send results to Processor
-bitex --disk /path/to/disk.img \
-	--server-url http://localhost:8080/api/v1/bitex/evidence \
-	--agent-token your-auth-token
+# Analyze block device
+bitex --disk /dev/sda \
+  --case-id "CASE-2025-001" \
+  --server https://server.com/api/analysis \
+  --token your-auth-token
 ```
 
-This command outputs a JSON report to stdout and, if --server-url is provided, POSTs the result to the specified Processor endpoint using the given bearer token.
+This command performs forensic analysis and transmits the results via authenticated POST request to the specified server.
 
-### Flags (Configuration Model)
-All runtime configuration is passed via CLI flags.
+### Command-Line Flags
 
-- `--disk` (required): Path to disk image or block device (read-only)
-- `--server-url` (optional): Processor endpoint to send analysis results as JSON
-- `--agent-token` (optional): Bearer token for authentication when sending results
-- `--case-id` (optional): Case identifier for correlation
+All runtime configuration is passed via CLI flags:
 
-**Environment variables** are not used for runtime configuration. The only relevant external dependency is **TSK** (mmls, fsstat, fls, istat), which must be available on the system PATH.
+- `--disk PATH` (required): Path to disk image or block device (read-only)
+- `--case-id ID` (required): Case identifier for correlation
+- `--server URL` (required): Remote server endpoint to send analysis results
+- `--token TOKEN` (required): Authentication token for server communication
+- `-h, --help`: Show help message
+- `-v, --version`: Show version information
 
-## Integration with Processor
+**Environment variables** are not used for runtime configuration. The only external dependency is **The Sleuth Kit (TSK)** which must be available in the system PATH.
 
-Bitex sends evidence to Processor via:
+## Server Integration
 
-- `POST /api/v1/bitex/evidence`
+Bitex transmits all analysis results via authenticated POST request to the configured server. The server receives:
 
-Processor stores the evidence and exposes it to Processor-UI. Bitex does not perform reporting or workflow orchestration.
+- Complete TSK analysis results (partition tables, filesystem metadata, file listings)
+- Embedded custody chain with all commands executed
+- Hash verification (MD5, SHA1, SHA256)
+- Complete audit trail of all operations
 
+## Core Responsibilities
 
-
-## Responsibilities
-
-- Disk imaging (TSK integration)
-- Filesystem analysis (mmls, fsstat, fls, istat)
-- JSON output with TSK results
-- Optional transmission to Processor (POST /api/v1/bitex/evidence)
+- **Metadata extraction** - TSK integration for disk analysis (no file content reading)
+- **Filesystem analysis** - Partition tables (mmls), filesystem info (fsstat), file listings (fls)
+- **Custody chain** - Complete tracking of all operations with timestamps
+- **JSON output** - Structured results with embedded custody chain
+- **Server transmission** - Authenticated POST to remote server
 
 ## Digital Evidence Custody Chain
 
-Bitex implements a comprehensive digital evidence custody chain for disk analysis:
+Bitex implements RFC 5424 compliant forensic custody chain tracking:
 
 ### Custody Chain Features
 
-**Standardized Hash Algorithms:**
+**Cryptographic Integrity:**
 - MD5 (128-bit) - Legacy compatibility
-- SHA1 (160-bit) - Legacy compatibility
+- SHA1 (160-bit) - Legacy compatibility  
 - SHA256 (256-bit) - Primary integrity verification
 - Hashes calculated for complete analysis package
 
-**TSK Command Logging:**
-- Every TSK command (mmls, fsstat, fls, istat) logged
-- Command arguments, timestamps, exit codes tracked
-- Output sizes and error messages captured
-- Converted to standardized CommandExecution format
+**Command Logging:**
+- Every TSK command (mmls, fsstat, fls, istat) tracked
+- Command arguments, start/end timestamps, exit codes
+- Working directory and target resources logged
+- Error messages captured for failed commands
 
-**Custody Transfer Tracking:**
-- Initial disk analysis by agent
-- Transmission to Processor for review
-- Verification hashes at each transfer point
+**OS Operations Logging:**
+- All system operations tracked automatically
+- File access, environment variables, hostname queries
+- Process IDs and execution context
+- Timestamps and exit codes for all operations
 
-**Timeline Generation:**
-- File created, modified, accessed, deleted timestamps
-- Extracted from TSK file entries
-- Formatted for TimeAnalysis integration
-- Includes deleted files with deletion timestamps
+**Audit Trail:**
+- Comprehensive log entries (INFO, WARNING, ERROR, DEBUG, CRITICAL)
+- Structured metadata for each log entry
+- Timestamps for all operations
+- Complete chain from start to finish
 
-**Processor Integration:**
-- TSKAnalysis with embedded custody chain
-- Automatic timeline extraction from file listing
-- TimeAnalysis and Report reference tracking
+### Components
 
-### Usage Example
+**Custody Chain:**
+- Automatic creation and tracking
+- Command execution logging
+- Structured logging with severity levels
+- Hash generation (MD5, SHA1, SHA256)
 
-```go
-// Create custody chain for disk analysis
-chain, _ := models.NewCustodyChainEntry(caseID, version)
+**TSK Analysis:**
+- Automatic tool version detection
+- Partition table analysis (mmls)
+- Filesystem metadata extraction (fsstat)
+- File and directory listings (fls)
+- Deleted file detection
+- Inode information (istat)
 
-// Convert TSK command logs to custody chain
-commands := models.ConvertTSKCommandLogs(tskAnalysis.CommandLogs)
-for _, cmd := range commands {
-    chain.AddCommandExecution(cmd)
-}
+## Project Structure
 
-// Finalize with analysis data
-analysisJSON, _ := json.Marshal(tskAnalysis)
-chain.Finalize(analysisJSON, len(tskAnalysis.FileListing))
-
-// Generate timeline for Processor
-timeline := models.GenerateTimelineFromTSK(tskAnalysis)
-
-// Mark transmission
-chain.MarkTransmitted(processorURL, response)
+```
+bitex/
+├── cmd/bitex/              # CLI entry point and initialization
+├── internal/
+│   ├── acquisition/        # Disk acquisition orchestration
+│   ├── config/            # Configuration parsing and validation
+│   ├── logger/            # RFC 5424 compliant logging
+│   ├── os/                # OS abstraction layer (Windows/Linux/Darwin)
+│   ├── sender/            # HTTP transmission to server
+│   ├── tsk/               # The Sleuth Kit integration
+│   └── utils/             # Shared utilities (ID generation)
+├── pkg/models/            # Data structures and custody chain
+└── tests/                 # Unit tests for all packages
 ```
 
-## Responsibilities
-- Disk and block-device forensic analysis
-- Integration with The Sleuth Kit (TSK)
-- Strict read-only access to disks or disk images
+## Testing
 
+Run tests with:
 
-## Structure
-- `cmd/bitex/` - CLI entry point
-- `internal/disk/` - Disk imaging, block device access
-- `internal/tsk/` - TSK integration
-- `internal/utils/` - Shared utilities
+```bash
+# Run all tests
+go test ./tests/... -v
 
+# Run specific test files
+go test ./tests/config_test.go -v
+go test ./tests/custody_helpers_test.go -v
+go test ./tests/os_test.go -v
+go test ./tests/utils_test.go -v
+go test ./tests/logger_test.go -v
+```
 
-For more information, see the ARCHITECTURE.md file.
+## Dependencies
+
+- **Go 1.25+** - Programming language
+- **The Sleuth Kit** - Forensic analysis tools (mmls, fsstat, fls, istat)
+- **github.com/google/uuid** - UUID generation for custody chain
+
+For detailed architecture information, see [ARCHITECTURE.md](ARCHITECTURE.md).  
+For deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)

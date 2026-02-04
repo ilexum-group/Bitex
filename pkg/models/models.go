@@ -4,17 +4,12 @@ package models
 // TSKAnalysis represents The Sleuth Kit analysis results for a disk.
 // (copied from Tracium for Bitex independence).
 type TSKAnalysis struct {
-	DiskPath          string              `json:"disk_path"`
-	FilesystemStats   *TSKFilesystemStats `json:"filesystem_stats,omitempty"`
-	FileListing       []TSKFileEntry      `json:"file_listing,omitempty"`
-	AnalysisTimestamp int64               `json:"analysis_timestamp"`
-	ToolVersions      map[string]string   `json:"tool_versions"`
-	CommandLogs       []TSKCommandLog     `json:"command_logs"`
-	CaseID            string              `json:"case_id"` // Case identifier for correlation
-	Errors            []string            `json:"errors,omitempty"`
-
-	// Custody Chain - Complete digital evidence custody tracking
-	CustodyChain *CustodyChainEntry `json:"custody_chain"`
+	DiskPath        string              `json:"disk_path"`
+	FilesystemStats *TSKFilesystemStats `json:"filesystem_stats,omitempty"`
+	FileListing     []TSKFileEntry      `json:"file_listing,omitempty"`
+	ToolVersions    map[string]string   `json:"tool_versions"`
+	CaseID          string              `json:"case_id"`       // Case identifier for correlation
+	CustodyChain    *CustodyChainEntry  `json:"custody_chain"` // Custody Chain - Complete digital evidence custody tracking
 }
 
 // TSKFilesystemStats contains filesystem-level statistics from TSK analysis.
@@ -44,14 +39,4 @@ type TSKFileEntry struct {
 	UID          int    `json:"uid"`
 	GID          int    `json:"gid"`
 	Deleted      bool   `json:"deleted"`
-}
-
-// TSKCommandLog represents a log entry for a TSK command execution.
-type TSKCommandLog struct {
-	Command    string   `json:"command"`
-	Arguments  []string `json:"arguments"`
-	Timestamp  int64    `json:"timestamp"`
-	ExitCode   int      `json:"exit_code"`
-	OutputSize int      `json:"output_size"`
-	Error      string   `json:"error,omitempty"`
 }
